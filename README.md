@@ -1,0 +1,1 @@
+# Kubernetes v1.30 Setup with Containerd using Kubeadm

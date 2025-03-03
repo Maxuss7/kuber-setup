@@ -2,7 +2,7 @@
 - name: Install Kubernetes with Kubeadm
   hosts: workers
   vars:
-    master_vpn_ip: IP
+    master_ip: IP
     master_kuber_token: token
     discovery-token-ca-cert-hash: hash
   become: yes
@@ -102,7 +102,7 @@
 
     - name: Join the node to the Kubernetes cluster
       command: >
-        kubeadm join {{ master_vpn_ip }}
+        kubeadm join {{ master_ip }}
         --token {{ master_kuber_token }}
         --discovery-token-ca-cert-hash sha256:{{ discovery-token-ca-cert-hash }}
       register: join_result

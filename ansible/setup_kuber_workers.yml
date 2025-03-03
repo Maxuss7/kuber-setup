@@ -1,0 +1,111 @@
+---
+- name: Install Kubernetes with Kubeadm
+  hosts: workers
+  vars:
+    master_vpn_ip: IP
+    master_kuber_token: token
+    discovery-token-ca-cert-hash: hash
+  become: yes
+  tasks:
+    - name: Update apt repositories
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+        state: present
+
+    - name: Create directory for apt keyrings
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+
+    - name: Add Kubernetes GPG key
+      get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
+
+    - name: Add Kubernetes repository
+      lineinfile:
+        path: /etc/apt/sources.list.d/kubernetes.list
+        line: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /'
+        create: yes
+
+    - name: Update apt cache after adding Kubernetes repo
+      apt:
+        update_cache: yes
+
+    - name: Install Kubernetes components
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+          - containerd
+        state: present
+
+    - name: Hold Kubernetes packages at current version
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: held
+
+    - name: Activate br_netfilter and overlay modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - br_netfilter
+        - overlay
+
+    - name: Enable packet forwarding and bridge netfilter
+      sysctl:
+        name: "{{ item }}"
+        value: "1"
+        state: present
+        reload: yes
+      loop:
+        - net.ipv4.ip_forward
+        - net.bridge.bridge-nf-call-iptables
+
+    - name: Ensure containerd configuration directory exists
+      file:
+        path: /etc/containerd
+        state: directory
+
+    - name: Update containerd config.toml for SystemdCgroup
+      copy:
+        dest: /etc/containerd/config.toml
+        content: |
+          version = 2
+          [plugins]
+            [plugins."io.containerd.grpc.v1.cri"]
+             [plugins."io.containerd.grpc.v1.cri".containerd]
+                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+                    runtime_type = "io.containerd.runc.v2"
+                    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+                      SystemdCgroup = true
+        mode: '0644'
+
+    - name: Restart containerd
+      systemd:
+        name: containerd
+        state: restarted
+
+    - name: Join the node to the Kubernetes cluster
+      command: >
+        kubeadm join {{ master_vpn_ip }}
+        --token {{ master_kuber_token }}
+        --discovery-token-ca-cert-hash sha256:{{ discovery-token-ca-cert-hash }}
+      register: join_result
+      ignore_errors: yes
+      
+

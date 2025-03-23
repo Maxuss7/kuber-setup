@@ -1,12 +1,29 @@
 ---
-- name: Install Kubernetes with Kubeadm
+# Usage:
+# ansible-playbook -e master_ip=MASTER_IP -e master_kuber_token=TOKEN -e hash=HASH -i inventory.ini setup_kuber_worker.yml
+
+- name: Install Kubernetes and connect workers
   hosts: workers
-  vars:
-    master_ip: IP
-    master_kuber_token: token
-    discovery-token-ca-cert-hash: hash
   become: yes
+
+  vars:
+    master_ip: "{{ master_ip }}" # can be vpn ip
+    master_kuber_token: "{{ master_kuber_token }}"
+    hash: "{{ hash }}"
+
   tasks:
+    - name: Disable swap (temporary)
+      command: swapoff -a
+
+    - name: Clean up old kubelet config files (if any)
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/bootstrap-kubelet.conf
+        - /etc/kubernetes/pki
+
     - name: Update apt repositories
       apt:
         update_cache: yes
@@ -18,23 +35,30 @@
           - ca-certificates
           - curl
         state: present
+        update_cache: yes 
 
     - name: Create directory for apt keyrings
       file:
         path: /etc/apt/keyrings
         state: directory
-
-    - name: Add Kubernetes GPG key
+        
+    - name: Download Kubernetes APT GPG key
       get_url:
         url: https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key
         dest: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         mode: '0644'
+      register: gpg_key_download
 
-    - name: Add Kubernetes repository
-      lineinfile:
-        path: /etc/apt/sources.list.d/kubernetes.list
-        line: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /'
-        create: yes
+    - name: Convert key to GPG format (if needed)
+      command:
+        cmd: gpg --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      when: gpg_key_download.changed
+
+    - name: Add Kubernetes apt repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
+        filename: kubernetes
+        state: present
 
     - name: Update apt cache after adding Kubernetes repo
       apt:
@@ -48,14 +72,6 @@
           - kubectl
           - containerd
         state: present
-
-    - name: Hold Kubernetes packages at current version
-      apt:
-        name:
-          - kubelet
-          - kubeadm
-          - kubectl
-        state: held
 
     - name: Activate br_netfilter and overlay modules
       modprobe:
@@ -102,10 +118,9 @@
 
     - name: Join the node to the Kubernetes cluster
       command: >
-        kubeadm join {{ master_ip }}
+        kubeadm join {{ master_ip }}:6443
         --token {{ master_kuber_token }}
-        --discovery-token-ca-cert-hash sha256:{{ discovery-token-ca-cert-hash }}
+        --discovery-token-ca-cert-hash {{ hash }}
       register: join_result
-      ignore_errors: yes
-      
 
+      

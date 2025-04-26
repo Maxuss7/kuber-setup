@@ -7,7 +7,7 @@
   become: yes
 
   vars:
-    master_ip: "{{ master_ip }}" # can be vpn ip
+    master_ip: "{{ master_ip }}"
     master_kuber_token: "{{ master_kuber_token }}"
     hash: "{{ hash }}"
 
@@ -69,7 +69,6 @@
         name:
           - kubelet
           - kubeadm
-          - kubectl
           - containerd
         state: present
 
